@@ -9,14 +9,6 @@ processor = transformers.AutoProcessor.from_pretrained("./layoutlmv3-large", app
 spatial_position_id = 150000
 img_patch_id = 150001
 
-# model args
-parser = argparse.ArgumentParser()
-parser.add_argument('--model_dir', type=str, help='model directory')
-parser.add_argument('--img_dir', type=str, help='image directory')
-parser.add_argument('--ocr_dir', type=str, help='ocr directory')
-parser.add_argument('--instruction', type=str, help='question of the image')
-args = parser.parse_args()
-
 def normalize_bbox(bbox, src_size, dst_size):
     """
     Normalize bounding box coordinates.
@@ -50,31 +42,34 @@ def normalize_bbox(bbox, src_size, dst_size):
     return [x1, y1, x2, y2]
 
 
-def main():
+def load_model(model_dir):
     # Load the config
     config = transformers.AutoConfig.from_pretrained(
-        args.model_dir,
+        model_dir,
         trust_remote_code=True,
     )
     generator_config = transformers.GenerationConfig.from_pretrained(
-        args.model_dir
+        model_dir
     ).to_dict()
 
     # Load the model
     model = transformers.AutoModelForCausalLM.from_pretrained(
-        args.model_dir,
+        model_dir,
         config=config,
         trust_remote_code=True,
+        torch_dtype=torch.bfloat16,
     )
     model = model.eval()
-    model = model.to(torch.float32)
     model = model.to('cuda' if torch.cuda.is_available() else 'cpu')
 
     # Load the tokenizer
-    tokenizer = transformers.AutoTokenizer.from_pretrained(args.model_dir)
+    tokenizer = transformers.AutoTokenizer.from_pretrained(model_dir)
+    return model, tokenizer, generator_config
+
+
+def predict(model, tokenizer, generator_config, img_dir, ocr_dir, instruction):
 
     # Load the image
-    img_dir = args.img_dir
     image = Image.open(img_dir).convert('RGB')
     width, height = image.size
     image = processor(image,
@@ -84,11 +79,10 @@ def main():
                       padding=True)['pixel_values'][0]
 
     # Load the OCR
-    ocr_dir = args.ocr_dir
     ocr_data = json.load(open(ocr_dir))
 
     # Load the instruction
-    prompt = args.instruction
+    prompt = instruction
     fore_prompt = '<|start_header_id|>system<|end_header_id|>\n\nYou are a helpful assistant.<|eot_id|>'
     fore_prompt += '<|start_header_id|>user<|end_header_id|>\n\nGiving the document image patches,'
     fore_llm_value_ids = tokenizer.encode(fore_prompt, add_special_tokens=False,)
@@ -130,6 +124,20 @@ def main():
 
     output = model.generate(**input, **generator_config).cpu()
     response = tokenizer.decode(output[0][len(input_ids):], skip_special_tokens=True)
+    return response
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--model_dir', type=str, help='model directory')
+    parser.add_argument('--img_dir', type=str, help='image directory')
+    parser.add_argument('--ocr_dir', type=str, help='ocr directory')
+    parser.add_argument('--instruction', type=str, help='question of the image')
+    args = parser.parse_args()
+
+    model, tokenizer, generator_config = load_model(args.model_dir)
+    response = predict(model, tokenizer, generator_config,
+                       args.img_dir, args.ocr_dir, args.instruction)
     print(f"Response: {response}")
 
 if __name__ == '__main__':
