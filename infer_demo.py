@@ -115,11 +115,18 @@ def predict(model, tokenizer, generator_config, img_dir, ocr_dir, instruction):
     position_ids = torch.LongTensor(position_ids)
     bbox = torch.LongTensor(bbox)
 
+    attention_mask = torch.ones_like(input_ids)
+    model_dtype = next(model.parameters()).dtype
+
     input = {
         "input_ids": input_ids.unsqueeze(0).to(model.device),
+        "attention_mask": attention_mask.unsqueeze(0).to(model.device),
         "position_ids": position_ids.unsqueeze(0).to(model.device),
         "bbox": bbox.unsqueeze(0).to(model.device),
-        "pixel_values": image.unsqueeze(0).to(model.device),
+        "pixel_values": image.unsqueeze(0).to(
+            device=model.device,
+            dtype=model_dtype,
+        ),
     }
 
     output = model.generate(**input, **generator_config).cpu()
