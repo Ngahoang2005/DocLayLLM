@@ -29,7 +29,7 @@ def main():
     args = parser.parse_args()
 
     image_dir = args.dataset_dir / 'images'
-    ocr_dir = args.dataset_dir / 'ocr'
+    ocr_dir = args.dataset_dir / 'ocr_sorted'
     qa_dir = args.dataset_dir / 'qa'
     qa_paths = sorted(qa_dir.glob('*.json'))
     if not qa_paths:

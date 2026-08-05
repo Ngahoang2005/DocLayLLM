@@ -1,5 +1,6 @@
 import os
 import json
+from pprint import pprint
 import torch
 import argparse
 import transformers
@@ -51,7 +52,8 @@ def load_model(model_dir):
     generator_config = transformers.GenerationConfig.from_pretrained(
         model_dir
     ).to_dict()
-
+    import pprint
+    pprint.pprint(generator_config)
     # Load the model
     model = transformers.AutoModelForCausalLM.from_pretrained(
         model_dir,
@@ -67,8 +69,15 @@ def load_model(model_dir):
     return model, tokenizer, generator_config
 
 
-def predict(model, tokenizer, generator_config, img_dir, ocr_dir, instruction):
-
+def predict(
+    model,
+    tokenizer,
+    generator_config,
+    img_dir,
+    ocr_dir,
+    instruction,
+    page=None,
+):
     # Load the image
     image = Image.open(img_dir).convert('RGB')
     width, height = image.size
@@ -80,7 +89,15 @@ def predict(model, tokenizer, generator_config, img_dir, ocr_dir, instruction):
 
     # Load the OCR
     ocr_data = json.load(open(ocr_dir))
+    ocr_chars = sum(len(x["text"]) for x in ocr_data)
 
+    print(
+        f"OCR lines={len(ocr_data)}, "
+        f"OCR chars={ocr_chars}",
+        flush=True,
+    )
+    if page is not None:
+        ocr_data = [x for x in ocr_data if x["page"] == page]
     # Load the instruction
     prompt = instruction
     fore_prompt = '<|start_header_id|>system<|end_header_id|>\n\nYou are a helpful assistant.<|eot_id|>'
@@ -109,6 +126,11 @@ def predict(model, tokenizer, generator_config, img_dir, ocr_dir, instruction):
         bbox += [norm_box,]
 
     input_ids = fore_llm_value_ids + aft_llm_value_ids
+    print("=" * 80)
+    print(f"OCR lines   : {len(ocr_data)}")
+    print(f"Input tokens: {len(input_ids)}")
+    print(f"Question len: {len(tokenizer.encode(instruction, add_special_tokens=False))}")
+    print("=" * 80)
     position_ids = list(range(len(input_ids)))
 
     input_ids = torch.LongTensor(input_ids)
@@ -128,8 +150,18 @@ def predict(model, tokenizer, generator_config, img_dir, ocr_dir, instruction):
             dtype=model_dtype,
         ),
     }
+    generator_config["do_sample"] = False
+    generator_config["num_beams"] = 1
 
-    output = model.generate(**input, **generator_config).cpu()
+    output = model.generate(**input, **generator_config)
+    allocated = torch.cuda.memory_allocated() / 1024**3
+    reserved = torch.cuda.memory_reserved() / 1024**3
+
+    print(
+        f"GPU allocated={allocated:.2f} GB, "
+        f"reserved={reserved:.2f} GB",
+        flush=True,
+    )
     response = tokenizer.decode(output[0][len(input_ids):], skip_special_tokens=True)
     return response
 
